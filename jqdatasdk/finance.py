@@ -6,7 +6,8 @@
 from .utils import *
 import sys
 from .client import JQDataClient
-
+from sqlalchemy.types import *
+from sqlalchemy.ext.declarative import declarative_base
 
 class Finance(object):
     RESULT_ROWS_LIMIT = 3000
@@ -15,27 +16,12 @@ class Finance(object):
 
     def __init__(self, disable_join=False):
         self.__disable_join = True
-        self.__table_names = None
-
-    def init(self):
-        self.__table_names = self.__load_table_names()
-        for name in self.__table_names:
-            setattr(self, name, self.__load_table_class(name))
+        self.__table_names = []
 
     def __load_table_names(self):
-        # import os
-        # tables_dir = os.path.join(sys.modules["ROOT_DIR"], 'fin_tables')
-        # names = []
-        # if os.path.exists(tables_dir):
-        #     for table_file in os.listdir(tables_dir):
-        #         if table_file.endswith('.py') and not table_file.startswith('__'):
-        #             names.append(table_file[:-3])
-        # return names
-
-        lst = JQDataClient.instance().get_table_orm(db=self.db_name)
-        ####
-
-        return lst
+        self.__table_names = JQDataClient.instance().get_table_orm(db=self.db_name)
+        for name in self.__table_names:
+            setattr(self, name, None)
 
     @assert_auth
     def run_query(self, query_object):
@@ -71,10 +57,8 @@ class Finance(object):
         import datetime
         from sqlalchemy import Date, Column, DateTime, Integer, Numeric, SmallInteger, String, Table, Text, text
         from sqlalchemy.dialects.mysql import TINYINT, TIMESTAMP, DECIMAL
-        from sqlalchemy.ext.declarative import declarative_base
 
         data = JQDataClient.instance().get_table_orm(db=self.db_name, table=table_name)
-
         dct = {}
         for k, v in data["columns"]:
             column = eval(v)
@@ -83,13 +67,23 @@ class Finance(object):
         dct["__tablename__"] = data["name"]
         return type(data["name"], (declarative_base(),), dct)
 
-    # def __getattribute__(self, key):
-    #     v = object.__getattribute__(self, key)
-    #     if v is None:
-    #         if key in self.__table_names:
-    #             v = self.__load_table_class(key)
-    #             setattr(self, key, v)
-    #     return v
+    def __getattr__(self, key):
+        # 如果没有预先加载了table名字, 加载它
+        if not self.__table_names:
+            self.__load_table_names()
+        # 只对table的名字调用getattr, 否则会无限递归
+        if key in self.__table_names:
+            return getattr(self, key)
+        else:
+            raise AttributeError("%r object has no attribute %r" % (self.__class__.__name__, key))
+
+    def __getattribute__(self, key):
+        v = object.__getattribute__(self, key)
+        if v is None:
+            if key in self.__table_names:
+                v = self.__load_table_class(key)
+                setattr(self, key, v)
+        return v
 
 
 finance = Finance()
